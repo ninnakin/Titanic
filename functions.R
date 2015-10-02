@@ -1,4 +1,6 @@
+# Cleans input data 
 cleandata <- function(dataset){
+  
   names(dataset) <- tolower(names(dataset))
   
   # Create factors 
@@ -7,9 +9,17 @@ cleandata <- function(dataset){
   dataset$sex <- factor(dataset$sex, levels=c("female", "male"))
   levels(dataset$sex) <- c("Female", "Male")
   
-  # Exclude not used columns
-  dataset <- dataset[,names(dataset)!=c("name")]
-  dataset <- dataset[,names(dataset)!=c("ticket")]
+  # remove factors
+  dataset$name <- as.character(dataset$name)
   
   return(dataset)
+}
+
+# Writes data to file for submission
+submitdata <- function(passengerid, survived, filename="submission.csv"){
+  submissiondata <- cbind(passengerid, as.numeric(survived))
+  colnames(submissiondata) <- c("PassengerId","Survived")
+  filename = paste0("Solutions/" , filename)
+  
+  write.table(submissiondata, file=filename, col.names=TRUE, row.names=FALSE, sep=",")
 }
