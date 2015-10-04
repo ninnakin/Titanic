@@ -30,91 +30,15 @@ train <- read.csv("train.csv", na.strings = "")
 test  <- read.csv("test.csv", na.strings = "")
 
 # Process data 
-
-# Look at passenger name 
-# Check what titles there are int the data (both train and test) 
 train <- cleandata(train)
-test <- cleandata(test)
+test  <- cleandata(test)
 test$survived <- NA
 combi <- rbind(train, test)
-
-# Extract titles
-# title seem to be in the second word
-n  <- sapply(strsplit(combi$name,","), function(x){x[2]})
-combi$title <- sapply(strsplit(n," "), function(x){x[2]})
-
-# one title is just "the" what does it stand for? 
-# change title to "Countess."
-combi$title[combi$title=="the"] <- "Countess."
-# some other titles are rare, lets bin them together
-combi$title[combi$title=="Mme."]<- "Mlle."
-combi$title[combi$title=="Ms."]<- "Miss."
-combi$title[combi$title %in% c("Don.", "Major.", "Col.", "Capt.","Jonkheer.")] <- "Sir."
-combi$title[combi$title %in% c("Dona.", "Countess.")] <- "Lady."
-combi$title <- factor(combi$title)
-
-# Combine parch and sibsp to one variable called family size
-combi$familysize <- combi$sibsp + combi$parch + 1
-combi$familysize[combi$familysize<=2] <- "small"
-
-# Identify families through surname and family size 
-combi$surname <- sapply(strsplit(combi$name,","), function(x){x[1]})
-combi$familyid <- paste0(combi$familysize,combi$surname)
-combi$familysize <- combi$sibsp + combi$parch + 1
-combi$familysize <- as.numeric(combi$familysize)
-
-# some familys are categorized as not small even though there is only one person in them 
-# look at these
-famIDs <- data.frame(table(combi$familyid))
-famIDs <- famIDs[famIDs$Freq<3, ]
-combi$familyid [combi$familyid  %in% famIDs$Var1] <- 'Small'
-combi$familyid  <- factor(combi$familyid )
-
-rm(famIDs)
-rm(n)
-
-# Embarked: set missing values to most common port
-combi$embarked[which(is.na(combi$embarked))]="S"
-combi$fare[which(is.na(combi$fare))]<-median(combi$fare, na.rm=TRUE)
-
-# Reduce factors for familyid for use in random forest
-combi$familyid2 <- as.character(combi$familyid)
-combi$familyid2[combi$familysize <= 3] <- 'Small'
-combi$familyid2 <- factor(combi$familyid2)
-
-# Estimate age using decision tree
-# Idea: Construct a decision tree using the passengers with known age
-# Use this to estimate the age of the remaining passengers
-fitage <- rpart(age ~ sex + pclass + embarked + fare + title + sibsp + parch + familysize, data=combi[!is.na(combi$age),], method="anova")
-combi$age[is.na(combi$age)] <- round(predict(fitage, combi[is.na(combi$age),]),0)
-
-# get cabin section and number
-# Some passengers have several cabins. In this case just choose the first one (I assume they are located close to each other)
-combi$cabin <- as.character(combi$cabin)
-singlecabin <- sapply(strsplit(combi$cabin, " "), function(x){x[1]})
-combi$cabinnumber  <- as.numeric(sub("[^0-9]", "", singlecabin))
-combi$cabinsection <- gsub("[^A-Z]", "", singlecabin)
-combi$cabinsection <- as.factor(combi$cabinsection)
-  
-# Estimate msising cabin sections using random forest
-#fitcabin <- rpart(cabinsection ~ age + sex + pclass + embarked + fare + title + sibsp + parch + familysize, data=combi[!is.na(combi$cabinsection),], method="class")
-#combi$cabinsection[is.na(combi$cabinsection)] <- predict(fitcabin, combi[is.na(combi$cabinsection),], type="class")
-
-# Cabin is mostly specified for passengers in first class
-# because of this I will only estimate for 1st class passengers
-
-unknown <- which(is.na(combi$cabinsection) & combi$pclass=="1st Class")
-fitcabin <- rpart(cabinsection ~ age + sex + pclass + embarked + fare + title + sibsp + parch + familysize, data=combi[which(!is.na(combi$cabinsection) & combi$pclass=="1st Class"),], method="class")
-combi$cabinsection[unknown] <- predict(fitcabin, combi[unknown,], type="class")
-levels(combi$cabinsection)<-c(levels(combi$cabinsection), c("2","3"))
-combi$cabinsection[which(is.na(combi$cabinsection) & combi$pclass=="2nd Class")] <- "2"
-combi$cabinsection[which(is.na(combi$cabinsection) & combi$pclass=="3rd Class")] <- "3"
-
+combi <- featureengineering(combi)
 
 # Split back into train and test data
 train <- combi[1:891,]
 test <- combi[892:1309,]
-
 
 # Explore data 
 names(train)
@@ -128,39 +52,27 @@ summary(train)
 # Look at correlation between gender, age, pclass, and port with survival
 # More females survive
 summarise(group_by(train, sex), mean(survived))
+qplot(sex, data=train, fill=as.factor(survived))
 
-qplot(sex, data=train, fill=survived)
 # Age 
 # More children survive, and more people in the 31-40 age group, less people in the 61-80 ages survive
-summarise(group_by(train, agegroup), mean(survived))
-
 hist(train$age[which(train$survived == "0")], main= "Passenger Age Histogram", xlab="Age", ylab="Count", col =4,
      breaks=seq(0,80,by=2))
 hist(train$age[which(train$survived == "1")], col =2, add = T, breaks=seq(0,80,by=2))
-
-qplot(age, data=train, fill=survived, colour=1, na.exclude=TRUE, binwidth=2)
-
-mosaicplot(train$agegroup ~ train$survived, main="Passenger Survival by embarkment port",
-           color=c("lightcoral", "cyan"), shade=FALSE,  xlab="", ylab="",
-           off=c(0), cex.axis=1)
-
-
-# Age and gender in combination: no gender diff for children 
-tmp1 <- summarise(group_by(train, agegroup, pclass, sex), survsum = sum(survived))
-tmp2 <- summarise(group_by(train, agegroup, pclass, sex), survmean = mean(survived))
-simplemod  <- merge(surv1, surv2,  by = intersect(names(surv1), names(surv2)))
+qplot(age, data=train, fill=as.factor(survived), colour=1, na.exclude=TRUE, binwidth=2)
 
 ## SVD
 train$classnumeric<-as.numeric(gsub("([0-9]+).*$", "\\1", train$pclass))
+train$sexnumeric<-as.numeric(train$sex)
 # include all numeric variables 
-svd1 = svd(scale(na.omit(train[, -c(1, 2, 3, 4, 9, 10)])))
+svd1 = svd(scale(na.omit(train[, c("age", "sibsp", "parch", "fare", "familysize", "classnumeric", "sexnumeric")])))
 par(mfrow = c(1, 2))
-plot(svd1$u[, 1], col = train$survived, pch = 19)
-plot(svd1$u[, 2], col = train$survived, pch = 19)
+plot(svd1$u[, 1], col = as.factor(train$survived), pch = 19)
+plot(svd1$u[, 2], col = as.factor(train$survived), pch = 19)
 # doesn't give any more information
 
 ## k-means
-kClust <- kmeans(na.omit(train[, -c(1, 2, 3, 4, 9, 10)]), centers = 10, nstart = 100)
+kClust <- kmeans(na.omit(train[, c("age", "sibsp", "parch", "fare", "familysize", "classnumeric", "sexnumeric")]), centers = 10, nstart = 100)
 table(kClust$cluster, na.omit(train)$survived)
 # also does not work, does not distinguish betwee survivors and non-survivors 
 
