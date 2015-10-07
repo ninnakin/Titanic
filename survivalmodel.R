@@ -281,7 +281,7 @@ submitdata(test$passengerid, as.character(test$survived), "randomforest1.csv")
 # No, performs worse than the simple tree
 
 # New approach: Conditional influence trees
-set.seed(49)
+set.seed(55)
 fit <- cforest(as.factor(survived) ~ pclass + sex + age + sibsp + parch + fare + embarked + title + familysize +
                  familyid + cabinsection,
                data = train, controls=cforest_unbiased(ntree=2000, mtry=3))
@@ -290,6 +290,53 @@ submitdata(test$passengerid, as.character(test$survived), "randomforest3.csv")
 
 # Yes! New score 0.8134 better than before
 # Not sure why this worked better though...
+
+# Other tree algorithm: Boosting
+# From gbm package
+install.packages('gbm')
+library(gbm)
+
+#stest  <- train[sample(nrow(train), 150, replace=FALSE),]
+#strain <- train[!train$passengerid %in% stest$passengerid,]
+train.GBM <- subset(train, select=c("survived","pclass","sex","age","sibsp","parch",
+                                    "fare","embarked","title","familysize","familyid", "cabinsection"))
+set.seed(45)
+fitboost <- gbm(survived ~ ., data=train.GBM, n.trees=5000,
+            shrinkage=0.005, interaction.depth=2, cv=10)
+
+# Test the boosting model on the holdout test dataset
+test$survived <- predict(fitboost, test, n.trees=trees, type="response")
+# I think 62% survive (from training set), so split at this percentile
+summary(test$survived)
+split <- quantile(test$survived,0.62)
+test$survived[test$survived >  split] <- 1
+test$survived[test$survived <= split] <- 0
+submitdata(test$passengerid, as.character(test$survived), "GBM_depth2_cv5_adaboost.csv")
+
+# store results for future
+survived_sh_001 <- test$survived
+survived_depth_1 <- test$survived
+survived_depth_2 <- test$survived              # best so far
+survived_depth_2_cabinsection <- test$survived # cabinsection does not make a difference  
+survived_depth2_cv5 <- test$survived
+survived_depth2_cv5_min5 <- test$survived
+survived_depth2_cv5_min20 <- test$survived
+survived_depth2_cv5_adaboost <- test$survived
+survived_depth2_cv5_sh00025 <- test$survived   # possible candidate?
+survived_depth_3 <- test$survived
+# I tried some parameters for the gbm
+# Shrinkage of 0.05 does not perform so good
+# Shrinkage of 0.005 is better 
+# Shrinkage = 0.001 does not work at all
+# Shrinkage of 0.005 + depth=2 => 0.8134 (for both cv=5 and cv=10, remains same when increasing number of trees)
+# what about depth=1? no, worse
+# setting minimum size of nodes to 5 makes model slightly worse
+# predicys that passengers 1046 and 1271 survive, but they die
+# setting minimum size to 20 does not make a difference
+
+# Next, try using adaboost fistribution instead of bernoulli 
+
+
 
 # After adding cabinsection to the prediction: 0.8038, so actually worse. hmm... 
 
