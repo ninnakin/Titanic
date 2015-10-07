@@ -80,7 +80,7 @@ predict.age <- function(combi){
   return(combi)
 }
   
-set.cabin <- function(cabin){
+set.cabin <- function(combi){
   # get cabin section and number
   # Some passengers have several cabins. In this case just choose the first one (I assume they are located close to each other)
   singlecabin <- sapply(strsplit(combi$cabin, " "), function(x){x[1]})
@@ -110,8 +110,8 @@ featureengineering <-function(combi){
 
   combi <- set.title(combi)
   combi <- set.family.info(combi)
-  combi <- predict.age(combi)
   combi <- set.cabin(combi)
+  combi <- predict.age(combi)
   return(combi)
 }
 
