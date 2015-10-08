@@ -298,44 +298,82 @@ library(gbm)
 
 #stest  <- train[sample(nrow(train), 150, replace=FALSE),]
 #strain <- train[!train$passengerid %in% stest$passengerid,]
-train.GBM <- subset(train, select=c("survived","pclass","sex","age","sibsp","parch",
-                                    "fare","embarked","title","familysize","familyid", "cabinsection"))
+train.GBM <- subset(train, select=c("survived","pclass","sex","age","sibsp","parch","fare",
+                                    "embarked","title","familysize","familyid", "cabinsection"))
 set.seed(45)
-fitboost <- gbm(survived ~ ., data=train.GBM, n.trees=5000,
-            shrinkage=0.005, interaction.depth=2, cv=10)
+trees = 2000;
+fitboost <- gbm(survived ~ ., data=train.GBM, n.trees=trees,
+            shrinkage=0.001, interaction.depth=4, cv=10)
 
 # Test the boosting model on the holdout test dataset
-test$survived <- predict(fitboost, test, n.trees=trees, type="response")
+test$survived <- predict(fitboost, test, type="response")
 # I think 62% survive (from training set), so split at this percentile
 summary(test$survived)
-split <- quantile(test$survived,0.62)
+split <- 0.5#quantile(test$survived,0.62)
+qplot(test$survived, fill=as.factor(test$survived>split), bin=0.01) 
 test$survived[test$survived >  split] <- 1
 test$survived[test$survived <= split] <- 0
-submitdata(test$passengerid, as.character(test$survived), "GBM_depth2_cv5_adaboost.csv")
+submitdata(test$passengerid, as.character(test$survived), "GBM_depth4_cv10_50split_sh0001.csv")
 
-# store results for future
-survived_sh_001 <- test$survived
-survived_depth_1 <- test$survived
-survived_depth_2 <- test$survived              # best so far
-survived_depth_2_cabinsection <- test$survived # cabinsection does not make a difference  
-survived_depth2_cv5 <- test$survived
-survived_depth2_cv5_min5 <- test$survived
-survived_depth2_cv5_min20 <- test$survived
-survived_depth2_cv5_adaboost <- test$survived
-survived_depth2_cv5_sh00025 <- test$survived   # possible candidate?
-survived_depth_3 <- test$survived
+
+
+# Divide my training data into strain and stest to optimize gbm parameters
+strain <- sample_n(train, 650)
+stest  <- train[!train$passengerid%in%strain$passengerid,]
+strain <- subset(strain, select=c("survived","pclass","sex","age","sibsp","parch","fare",
+                                    "embarked","title","familysize","familyid", "cabinsection"))
+
+
+# now use strain to create a number of different models 
+trees = 1000;
+# try different values of shrinkage and interaction depth 
+sh <- c(0.0005, 0.001, 0.0025,0.005)
+depth <- seq(3,5,1)
+
+for(i in 1:length(depth)){
+
+    for(j in 1:length(sh)){
+
+    set.seed(35)
+    fitboost  <- gbm(survived ~ ., data=strain, n.trees=trees, distribution="bernoulli",
+                 shrinkage=sh[j], interaction.depth=depth[i], cv=10)
+    
+    pred  <- predict(fitboost, stest, type="response")
+    split <- 0.5#quantile(pred,0.62)
+    survived[pred >  split] <- 1
+    survived[pred <= split] <- 0
+    
+    error_rate<- mean(stest$survived==survived)
+    
+    if(i==1 & j==1){
+      df <- c(depth[i], sh[j], error_rate)
+      names(df)<-c("depth", "shrinkage", "errorrate")
+    }
+    else{
+      df <- rbind(df, c(depth[i], sh[j], error_rate))
+    }
+  }
+}
+
+qplot(x=df[,2],y=df[,3],col=as.factor(df[,1]), xlab="shrinkage", ylab="error rate", size=as.factor(df[,1]), alpha=0.5)
+
+# based on this analysis, best alternative is shrinkage=0.001 and depth = 4
+# but this does not give an improvement of results 
+
+# redoing the analysis but used 0.5 as cutoff
+# best alternative is shrinkage=0.0005 and depth = 3 (sh=0.001 and depth= 4 is still good)
+
+# Non of these improve the score against the actual test data though...
+
 # I tried some parameters for the gbm
 # Shrinkage of 0.05 does not perform so good
 # Shrinkage of 0.005 is better 
-# Shrinkage = 0.001 does not work at all
+# Shrinkage = 0.001 does not work at all, but maybe it will work better with a more flexible
 # Shrinkage of 0.005 + depth=2 => 0.8134 (for both cv=5 and cv=10, remains same when increasing number of trees)
 # what about depth=1? no, worse
 # setting minimum size of nodes to 5 makes model slightly worse
-# predicys that passengers 1046 and 1271 survive, but they die
+# predicts that passengers 1046 and 1271 survive, but they die
 # setting minimum size to 20 does not make a difference
-
-# Next, try using adaboost fistribution instead of bernoulli 
-
 
 
 # After adding cabinsection to the prediction: 0.8038, so actually worse. hmm... 
